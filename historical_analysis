@@ -1,0 +1,43 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# 1. Setup your URL
+SHEET_ID = '1PBZ55APcypQbZwFdBmcdMFkf45WX0hrlb0U2otz92xY'
+url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
+
+try:
+    # Load the data
+    df = pd.read_csv(url)
+    print("Google Sheet loaded successfully!")
+    
+    # --- START OF PLOTTING BLOCK ---
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+
+    # Left Axis: Win Rates
+    # We save these as lns1 and lns2 to "catch" them for the legend later
+    lns1 = ax1.plot(df['Year'], df['Service_Win_Pct'], color='#1f77b4', marker='o', label='Service Win %')
+    lns2 = ax1.plot(df['Year'], df['Return_Win_Pct'], color='#2ca02c', marker='s', label='Return Win %', linewidth=3) # Hero line
+    
+    ax1.set_xlabel('Year', fontsize=12)
+    ax1.set_ylabel('Win Percentage (%)', fontsize=12)
+    ax1.grid(True, alpha=0.3)
+
+    # Right Axis: Ace Rate
+    ax2 = ax1.twinx()
+    lns3 = ax2.plot(df['Year'], df['Ace_Rate'], color='#d62728', linestyle='--', marker='^', label='Ace Rate')
+    ax2.set_ylabel('Ace Rate (%)', color='#d62728', fontsize=12)
+    ax2.tick_params(axis='y', labelcolor='#d62728')
+
+    # THE LEGEND FIX: Combine lns1, lns2, and lns3
+    lns = lns1 + lns2 + lns3
+    labs = [l.get_label() for l in lns]
+    ax1.legend(lns, labs, loc='upper left', frameon=True, shadow=True)
+
+    plt.title("Historical Analysis: Percentage of Points Won Amongst Servers and Returners", fontsize=14, pad=20)
+    plt.tight_layout()
+    # --- END OF PLOTTING BLOCK ---
+
+    plt.show()
+
+except Exception as e:
+    print(f"Error: {e}")
