@@ -1,0 +1,228 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import numpy as np
+from scipy import stats
+
+# ─────────────────────────────────────────────
+# 1. LOAD & CLEAN DATA
+# ─────────────────────────────────────────────
+url = "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2024.csv"
+df = pd.read_csv(url)
+print(f"Total matches loaded: {len(df)}")
+
+needed = ['w_svpt', 'l_svpt', 'w_1stWon', 'w_2ndWon',
+          'l_1stWon', 'l_2ndWon', 'l_bpFaced', 'l_bpSaved']
+df = df.dropna(subset=needed).copy()
+print(f"Matches after cleaning: {len(df)}")
+
+# ─────────────────────────────────────────────
+# 2. BUILD MATCH-LEVEL DATASET
+#    For each match, compute:
+#      - breaks:      how many times winner broke serve
+#      - return_pct:  winner's return points won %
+# ─────────────────────────────────────────────
+records = []
+for _, row in df.iterrows():
+    if row['l_svpt'] > 0 and row['w_svpt'] > 0:
+        # Breaks = loser's BP faced minus BP saved
+        breaks = row['l_bpFaced'] - row['l_bpSaved']
+        if breaks < 0:
+            continue
+
+        # Winner's return % = 100 - loser's serve %
+        loser_serve_pct = (row['l_1stWon'] + row['l_2ndWon']) / row['l_svpt'] * 100
+        winner_return_pct = 100 - loser_serve_pct
+
+        records.append({
+            'breaks':      int(breaks),
+            'return_pct':  winner_return_pct
+        })
+
+data = pd.DataFrame(records)
+print(f"Match observations: {len(data)}")
+print(f"Breaks range: {data['breaks'].min()} – {data['breaks'].max()}")
+
+# ─────────────────────────────────────────────
+# 3. BAR CHART DATA
+#    % of matches won with exactly X breaks
+#    (since every row IS a winner, % = count at
+#     that break level / total matches at that level
+#     → but since all rows are winners this is 100%
+#     → instead: frame as "of all 2024 matches,
+#     what % were decided by exactly X breaks?")
+#
+#    Better framing: among ALL match outcomes,
+#    what % of WINNING performances had X breaks?
+#    i.e. frequency distribution of breaks among winners
+# ─────────────────────────────────────────────
+
+# Cap at 8 breaks (very rare above this)
+data_capped = data[data['breaks'] <= 8].copy()
+
+break_counts = data_capped.groupby('breaks').size().reset_index(name='count')
+break_counts['pct'] = break_counts['count'] / break_counts['count'].sum() * 100
+avg_breaks = data_capped['breaks'].mean()
+
+print(f"\nAverage breaks per match (winners): {avg_breaks:.2f}")
+print(break_counts)
+
+# ─────────────────────────────────────────────
+# 4. LINEAR REGRESSION: Return % → Breaks
+# ─────────────────────────────────────────────
+x = data['return_pct'].values
+y = data['breaks'].values
+
+slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+r2 = r_value ** 2
+
+print(f"\n─── LINEAR REGRESSION: Return % → Breaks ───")
+print(f"  Slope:     {slope:.4f}")
+print(f"  Intercept: {intercept:.4f}")
+print(f"  R²:        {r2:.4f}")
+print(f"  p-value:   {p_value:.2e}")
+print(f"  Equation:  Breaks = {slope:.4f} × Return% + ({intercept:.4f})")
+
+x_line = np.linspace(x.min(), x.max(), 300)
+y_line = slope * x_line + intercept
+
+# ─────────────────────────────────────────────
+# 5. BOOTSTRAP: 5000 trials
+#    Resample matches with replacement each trial,
+#    refit regression, record slope
+# ─────────────────────────────────────────────
+N_BOOTSTRAP = 5000
+np.random.seed(42)
+boot_slopes = []
+
+for _ in range(N_BOOTSTRAP):
+    idx = np.random.choice(len(data), size=len(data), replace=True)
+    x_b = data['return_pct'].values[idx]
+    y_b = data['breaks'].values[idx]
+    b_slope, *_ = stats.linregress(x_b, y_b)
+    boot_slopes.append(b_slope)
+
+boot_slopes = np.array(boot_slopes)
+ci_low  = np.percentile(boot_slopes, 2.5)
+ci_high = np.percentile(boot_slopes, 97.5)
+
+print(f"\n─── BOOTSTRAP RESULTS (N={N_BOOTSTRAP}) ───")
+print(f"  Observed slope:      {slope:.4f}")
+print(f"  Bootstrap mean:      {boot_slopes.mean():.4f}")
+print(f"  95% CI:              [{ci_low:.4f}, {ci_high:.4f}]")
+
+# ─────────────────────────────────────────────
+# 6. VISUALISATIONS
+# ─────────────────────────────────────────────
+PURPLE = '#a78bfa'
+TEAL   = '#2dd4bf'
+GOLD   = '#fbbf24'
+RED    = '#f87171'
+PANEL  = '#1a1a2e'
+TEXT   = '#e2e8f0'
+GRID   = '#2a2a3e'
+BG     = '#0f0f1a'
+
+def style_ax(ax):
+    ax.set_facecolor(PANEL)
+    ax.tick_params(colors=TEXT, labelsize=10)
+    ax.xaxis.label.set_color(TEXT)
+    ax.yaxis.label.set_color(TEXT)
+    ax.title.set_color(TEXT)
+    for spine in ax.spines.values():
+        spine.set_edgecolor(GRID)
+    ax.grid(color=GRID, linestyle='--', linewidth=0.6, alpha=0.7)
+
+fig = plt.figure(figsize=(20, 16))
+fig.patch.set_facecolor(BG)
+gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.45, wspace=0.35)
+
+# ── PLOT 1: Bar Chart — Breaks Distribution among Winners ──
+ax1 = fig.add_subplot(gs[0, :])   # full top row
+style_ax(ax1)
+
+bars = ax1.bar(
+    break_counts['breaks'], break_counts['pct'],
+    color=PURPLE, alpha=0.82, edgecolor=GRID, width=0.6
+)
+
+# % label above each bar
+for bar, (_, row) in zip(bars, break_counts.iterrows()):
+    ax1.text(bar.get_x() + bar.get_width() / 2,
+             bar.get_height() + 0.4,
+             f"{row['pct']:.1f}%\n(N={int(row['count'])})",
+             ha='center', va='bottom', color=TEXT,
+             fontsize=9, fontweight='bold')
+
+# Average breaks dotted line
+ax1.axvline(avg_breaks, color=GOLD, linewidth=2, linestyle='--',
+            label=f'Avg breaks by winner: {avg_breaks:.2f}')
+
+ax1.set_xlabel('Number of Service Breaks by Winner', fontsize=12)
+ax1.set_ylabel('% of Matches', fontsize=12)
+ax1.set_title('How Many Times Did the Winner Break Serve?\nDistribution of Service Breaks Among 2024 ATP Match Winners',
+              fontsize=14, fontweight='bold', pad=12)
+ax1.set_xticks(break_counts['breaks'])
+ax1.legend(facecolor=PANEL, edgecolor=GRID, labelcolor=TEXT, fontsize=10)
+ax1.set_ylim(0, break_counts['pct'].max() * 1.22)
+
+# ── PLOT 2: Scatter + Regression Line ──
+ax2 = fig.add_subplot(gs[1, 0])
+style_ax(ax2)
+
+ax2.scatter(data['return_pct'], data['breaks'],
+            alpha=0.10, s=10, color=TEAL, rasterized=True)
+ax2.plot(x_line, y_line, color=GOLD, linewidth=2.5,
+         label=f'y = {slope:.4f}x + ({intercept:.4f})\nR² = {r2:.3f}  |  p = {p_value:.2e}')
+
+ax2.set_xlabel('Winner Return Points Won %', fontsize=12)
+ax2.set_ylabel('Number of Service Breaks', fontsize=12)
+ax2.set_title('Return Points Won % → Service Breaks\nLinear Regression (2024 ATP)',
+              fontsize=13, fontweight='bold', pad=10)
+ax2.legend(facecolor=PANEL, edgecolor=GRID, labelcolor=TEXT, fontsize=9)
+
+# ── PLOT 3: Bootstrap Histogram ──
+ax3 = fig.add_subplot(gs[1, 1])
+style_ax(ax3)
+
+n, bins, patches = ax3.hist(boot_slopes, bins=60, color=PURPLE,
+                             alpha=0.75, edgecolor=GRID)
+
+# Colour CI region in histogram bars
+for patch, left in zip(patches, bins[:-1]):
+    if ci_low <= left <= ci_high:
+        patch.set_facecolor(GOLD)
+        patch.set_alpha(0.85)
+
+# CI bracket on x-axis
+y_bracket = -n.max() * 0.07
+ax3.annotate('', xy=(ci_high, y_bracket), xytext=(ci_low, y_bracket),
+             arrowprops=dict(arrowstyle='<->', color=GOLD, lw=2))
+ax3.text((ci_low + ci_high) / 2, y_bracket - n.max() * 0.04,
+         f'95% CI', ha='center', color=GOLD, fontsize=9, fontweight='bold')
+
+# Observed slope line
+ax3.axvline(slope, color=RED, linewidth=2, linestyle='--',
+            label=f'Observed slope: {slope:.4f}')
+
+# CI label above plot
+ax3.set_title(
+    f'Bootstrap Distribution of Regression Slope (N=5,000)\n95% CI: [{ci_low:.4f},  {ci_high:.4f}]',
+    fontsize=13, fontweight='bold', pad=10, color=TEXT
+)
+ax3.set_xlabel('Slope of Regression Line', fontsize=12)
+ax3.set_ylabel('Frequency', fontsize=12)
+ax3.legend(facecolor=PANEL, edgecolor=GRID, labelcolor=TEXT, fontsize=9)
+ax3.set_ylim(y_bracket - n.max() * 0.1, n.max() * 1.12)
+
+# Master title
+fig.suptitle(
+    'Service Breaks & Return Efficiency — ATP 2024 Season\nBreak Distribution Among Winners  |  Return % → Breaks Regression  |  Bootstrap Confidence Interval',
+    fontsize=14, fontweight='bold', color=TEXT, y=1.01
+)
+
+plt.savefig('breaks_regression_2024.png', dpi=150,
+            bbox_inches='tight', facecolor=BG)
+plt.subplots_adjust(top=0.93)
+plt.show()
+print("\nChart saved as 'breaks_regression_2024.png'")
