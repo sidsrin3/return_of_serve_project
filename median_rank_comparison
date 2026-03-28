@@ -1,0 +1,69 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+# --- Data (paste your Google Sheet ID or use the dict below) ---
+# Option A: load from Google Sheet (replace SHEET_ID with yours)
+# url = "https://docs.google.com/spreadsheets/d/SHEET_ID/export?format=csv"
+# df = pd.read_csv(url)
+
+# Option B: hardcoded directly from your table
+data = {
+    'Rank Distribution': ['1-10', '11-30', '31-50', '51-75', '76-100'],
+    'Median Return % Won': [40.45, 37.68, 35.63, 35.53, 34.60],
+    'Median # of Serve Breaks': [3.40, 2.75, 2.48, 2.34, 2.22]
+}
+df = pd.DataFrame(data)
+
+x = np.arange(len(df['Rank Distribution']))
+bar_width = 0.5
+
+# --- Bar Chart 1: Median Return % Won ---
+fig1, ax1 = plt.subplots(figsize=(9, 6))
+bars1 = ax1.bar(x, df['Median Return % Won'], width=bar_width, color='purple', alpha=0.75, edgecolor='black')
+
+ax1.set_title('Median Return Points Won % by Rank Distribution (2024)', fontsize=14, fontweight='bold', pad=15)
+ax1.set_xlabel('Rank Distribution', fontsize=12)
+ax1.set_ylabel('Median Return Points Won %', fontsize=12)
+ax1.set_xticks(x)
+ax1.set_xticklabels(df['Rank Distribution'])
+ax1.set_ylim(32, 42)   # zoomed in so differences are visible
+ax1.grid(axis='y', linestyle='--', alpha=0.5)
+ax1.yaxis.set_minor_locator(plt.MultipleLocator(0.5))
+
+# Value labels on top of each bar
+for bar in bars1:
+    height = bar.get_height()
+    ax1.text(bar.get_x() + bar.get_width() / 2, height + 0.05,
+             f'{height:.2f}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.93)
+plt.savefig('return_pct_by_rank.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# --- Bar Chart 2: Median Service Breaks ---
+fig2, ax2 = plt.subplots(figsize=(9, 6))
+bars2 = ax2.bar(x, df['Median # of Serve Breaks'], width=bar_width, color='red', alpha=0.75, edgecolor='black')
+
+ax2.set_title('Median Service Breaks per Match by Rank Distribution (2024)', fontsize=14, fontweight='bold', pad=15)
+ax2.set_xlabel('Rank Distribution', fontsize=12)
+ax2.set_ylabel('Median # of Service Breaks per Match', fontsize=12)
+ax2.set_xticks(x)
+ax2.set_xticklabels(df['Rank Distribution'])
+ax2.set_ylim(1.8, 3.8)   # zoomed in so differences are visible
+ax2.grid(axis='y', linestyle='--', alpha=0.5)
+ax2.yaxis.set_minor_locator(plt.MultipleLocator(0.1))
+
+# Value labels on top of each bar
+for bar in bars2:
+    height = bar.get_height()
+    ax2.text(bar.get_x() + bar.get_width() / 2, height + 0.02,
+             f'{height:.2f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.93)
+plt.savefig('breaks_by_rank.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+print("Charts saved!")
