@@ -1,0 +1,156 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Load data
+url = "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2024.csv"
+df = pd.read_csv(url)
+print("Data loaded successfully!")
+print(f"Total matches: {len(df)}")
+
+# 1. Target players 
+# this is the example for players ranked 1-10. the same code was used with different players when the ranking bins changed.
+target_players = [
+    "Jannik Sinner", "Alexander Zverev", "Carlos Alcaraz", "Taylor Fritz",
+    "Daniil Medvedev", "Casper Ruud", "Novak Djokovic", "Andrey Rublev",
+    "Alex De Minaur", "Grigor Dimitrov"
+]
+
+# Storage
+return_stats = {p: [] for p in target_players}
+break_stats  = {p: [] for p in target_players}
+
+# Columns needed — drop rows where ANY of these are NaN to avoid silent errors
+service_cols = ['l_svpt', 'l_1stWon', 'l_2ndWon', 'l_bpFaced', 'l_bpSaved',
+                'w_svpt', 'w_1stWon', 'w_2ndWon', 'w_bpFaced', 'w_bpSaved']
+df_clean = df.dropna(subset=service_cols).copy()
+print(f"Matches after dropping rows with missing service stats: {len(df_clean)}")
+
+# 2 & 3. Loop through matches
+for _, row in df_clean.iterrows():
+
+    # --- PLAYER WON ---
+    if row['winner_name'] in target_players:
+        p = row['winner_name']
+
+        # Return %: 100 minus opponent's points-won-on-serve %
+        if row['l_svpt'] > 0:
+            opp_hold_pct = (row['l_1stWon'] + row['l_2ndWon']) / row['l_svpt'] * 100
+            return_stats[p].append(100 - opp_hold_pct)
+
+        # Breaks = opponent BP faced minus BP saved (must be non-negative)
+        breaks = row['l_bpFaced'] - row['l_bpSaved']
+        if breaks >= 0:                         # sanity guard
+            break_stats[p].append(int(breaks))
+
+    # --- PLAYER LOST ---
+    elif row['loser_name'] in target_players:
+        p = row['loser_name']
+
+        # Return %: 100 minus winner's points-won-on-serve %
+        if row['w_svpt'] > 0:
+            opp_hold_pct = (row['w_1stWon'] + row['w_2ndWon']) / row['w_svpt'] * 100
+            return_stats[p].append(100 - opp_hold_pct)
+
+        # Breaks = winner's BP faced minus BP saved
+        breaks = row['w_bpFaced'] - row['w_bpSaved']
+        if breaks >= 0:
+            break_stats[p].append(int(breaks))
+
+# Diagnostics: confirm every player has data
+print("\n--- Match counts per player ---")
+for p in target_players:
+    print(f"  {p}: return_pts={len(return_stats[p])}, breaks={len(break_stats[p])}")
+
+# 4. Five-Number Summaries
+def get_summary_df(data_dict):
+    rows = []
+    for p in target_players:
+        d = data_dict[p]
+        if d:
+            rows.append({
+                'Player': p,
+                'Min':    round(np.min(d), 2),
+                'Q1':     round(np.percentile(d, 25), 2),
+                'Median': round(np.median(d), 2),
+                'Q3':     round(np.percentile(d, 75), 2),
+                'Max':    round(np.max(d), 2),
+                'N':      len(d)
+            })
+    return pd.DataFrame(rows)
+
+df_sum_return = get_summary_df(return_stats)
+df_sum_breaks = get_summary_df(break_stats)
+avg_median_return = df_sum_return['Median'].mean()
+avg_median_breaks = df_sum_breaks['Median'].mean()
+
+print(f"\nAverage Median Return Win % across all players: {avg_median_return:.2f}%")
+print(f"Average Median Service Breaks across all players: {avg_median_breaks:.2f}")
+
+print("\n--- Return Win %: Five-Number Summary ---")
+print(df_sum_return.to_string(index=False))
+
+print("\n--- Service Breaks: Five-Number Summary ---")
+print(df_sum_breaks.to_string(index=False))
+
+# 5. Visualizations
+# Short labels for x-axis readability
+short_labels = [n.split()[-1] for n in target_players]   # last name only
+
+fig, axes = plt.subplots(1, 2, figsize=(18, 7))
+fig.suptitle('ATP Top-10 – 2024 Return of Serve Season Stats', fontsize=16, fontweight='bold', y=0.97)
+
+# --- Plot 1: Return Win % ---
+ax1 = axes[0]
+bp1 = ax1.boxplot(
+    [return_stats[p] for p in target_players],
+    labels=short_labels,
+    patch_artist=True,
+    medianprops=dict(color='crimson', linewidth=2),
+    boxprops=dict(facecolor='steelblue', alpha=0.6),
+    whiskerprops=dict(linewidth=1.4),
+    capprops=dict(linewidth=1.4),
+    flierprops=dict(marker='o', markersize=4, alpha=0.4, color='steelblue')
+)
+ax1.set_title('Return Points Won % per Match', fontsize=13, pad=10)
+ax1.set_ylabel('Return Win %', fontsize=11)
+ax1.set_xlabel('Player', fontsize=11)
+ax1.tick_params(axis='x', rotation=35)
+ax1.grid(axis='y', linestyle='--', alpha=0.5)
+ax1.yaxis.set_minor_locator(plt.MultipleLocator(1))
+
+# Annotate median values
+for i, p in enumerate(target_players):
+    med = np.median(return_stats[p])
+    ax1.text(i + 1, med + 0.4, f'{med:.1f}', ha='center', va='bottom',
+             fontsize=7.5, color='crimson', fontweight='bold')
+
+# --- Plot 2: Service Breaks ---
+ax2 = axes[1]
+bp2 = ax2.boxplot(
+    [break_stats[p] for p in target_players],
+    labels=short_labels,
+    patch_artist=True,
+    medianprops=dict(color='darkgreen', linewidth=2),
+    boxprops=dict(facecolor='mediumseagreen', alpha=0.6),
+    whiskerprops=dict(linewidth=1.4),
+    capprops=dict(linewidth=1.4),
+    flierprops=dict(marker='o', markersize=4, alpha=0.4, color='seagreen')
+)
+ax2.set_title('Service Breaks per Match', fontsize=13, pad=10)
+ax2.set_ylabel('Number of Breaks', fontsize=11)
+ax2.set_xlabel('Player', fontsize=11)
+ax2.tick_params(axis='x', rotation=35)
+ax2.grid(axis='y', linestyle='--', alpha=0.5)
+ax2.yaxis.set_major_locator(plt.MaxNLocator(integer=True))
+
+# Annotate median values
+for i, p in enumerate(target_players):
+    med = np.median(break_stats[p])
+    ax2.text(i + 1, med + 0.05, f'{med:.1f}', ha='center', va='bottom',
+             fontsize=7.5, color='darkgreen', fontweight='bold')
+
+plt.tight_layout()
+plt.savefig('tennis_stats_2024.png', dpi=150, bbox_inches='tight')
+plt.show()
+print("\nChart saved as 'tennis_stats_2024.png'")
