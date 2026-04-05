@@ -1,0 +1,145 @@
+import pandas as pd
+import numpy as np
+from math import comb
+
+# ─────────────────────────────────────────────
+# 1. LOAD & CLEAN DATA
+# ─────────────────────────────────────────────
+url = "https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2024.csv"
+df = pd.read_csv(url)
+
+needed = ['l_bpFaced', 'l_bpSaved', 'w_bpFaced', 'w_bpSaved']
+df = df.dropna(subset=needed).copy()
+print(f"Clean matches: {len(df)}")
+
+df['winner_breaks'] = df['l_bpFaced'] - df['l_bpSaved']
+df['loser_breaks']  = df['w_bpFaced'] - df['w_bpSaved']
+df = df[(df['winner_breaks'] >= 0) & (df['loser_breaks'] >= 0)]
+print(f"Matches after sanity filter: {len(df)}")
+
+# ─────────────────────────────────────────────
+# 2. COMPUTE P(Win | K = k) FOR EACH k
+# ─────────────────────────────────────────────
+results = []
+for k in range(0, 11):
+    won_with_k   = len(df[df['winner_breaks'] == k])
+    lost_with_k  = len(df[df['loser_breaks']  == k])
+    total_with_k = won_with_k + lost_with_k
+    p_win_given_k = won_with_k / total_with_k if total_with_k > 0 else None
+    results.append({
+        'k':            k,
+        'won_with_k':   won_with_k,
+        'lost_with_k':  lost_with_k,
+        'total_with_k': total_with_k,
+        'P(Win | K=k)': round(p_win_given_k, 4) if p_win_given_k else None
+    })
+
+results_df = pd.DataFrame(results)
+print("\n─── P(Win | K = k) from 2024 ATP Data ───")
+print(results_df.to_string(index=False))
+
+# ─────────────────────────────────────────────
+# 3. SOLVE P(Win | K >= 3) USING BAYES
+# ─────────────────────────────────────────────
+p_break = 0.2274
+n       = 10
+
+P_k = {k: comb(n, k) * p_break**k * (1 - p_break)**(n-k) for k in range(n+1)}
+
+p_win_dict = {
+    row['k']: row['P(Win | K=k)']
+    for _, row in results_df.iterrows()
+    if row['P(Win | K=k)'] is not None
+}
+
+numerator   = sum(p_win_dict.get(k, 0) * P_k[k] for k in range(3, 11))
+denominator = sum(P_k[k] for k in range(3, 11))
+P_win_3plus = numerator / denominator
+
+print(f"\n─── Bayes Result ───")
+print(f"P(K >= 3)        = {denominator:.4f}  ({denominator*100:.1f}% of matches)")
+print(f"P(Win | K >= 3)  = {P_win_3plus:.4f}  ({P_win_3plus*100:.1f}%)")
+
+# ─────────────────────────────────────────────
+# 4. FULL BREAKDOWN TABLE
+# ─────────────────────────────────────────────
+print("\n─── Full Breakdown for Bayes Numerator ───")
+print(f"{'k':<5} {'P(Win|K=k)':<15} {'P(K=k)':<15} {'Product':<15}")
+print("-" * 50)
+for k in range(3, 11):
+    pw = p_win_dict.get(k, 0)
+    pk = P_k[k]
+    print(f"{k:<5} {pw:<15.4f} {pk:<15.4f} {pw*pk:<15.4f}")
+print("-" * 50)
+print(f"{'Σ':<5} {'':<15} {denominator:<15.4f} {numerator:<15.4f}")
+print(f"\nP(Win | K >= 3) = {numerator:.4f} / {denominator:.4f} = {P_win_3plus:.4f}")
+
+# ─────────────────────────────────────────────
+# 5. FORMATTED TABLE
+# ─────────────────────────────────────────────
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(13, 5))
+fig.patch.set_facecolor('#0f0f1a')
+ax.set_facecolor('#0f0f1a')
+ax.axis('off')
+
+# Build table data
+table_data = []
+for k in range(0, 11):
+    row = results_df[results_df['k'] == k].iloc[0]
+    p_win = row['P(Win | K=k)']
+    table_data.append([
+        str(int(row['k'])),
+        str(int(row['won_with_k'])),
+        str(int(row['lost_with_k'])),
+        str(int(row['total_with_k'])),
+        f"{p_win:.4f}" if p_win else 'N/A'
+    ])
+
+col_labels = ['k  (Breaks)', 'Won with k', 'Lost with k', 'Total', 'P(Win | K=k)']
+
+table = ax.table(
+    cellText=table_data,
+    colLabels=col_labels,
+    cellLoc='center',
+    loc='center'
+)
+
+table.auto_set_font_size(False)
+table.set_fontsize(11)
+table.scale(1.2, 2.0)
+
+for (row, col), cell in table.get_celld().items():
+    cell.set_edgecolor('#2a2a3e')
+    if row == 0:
+        # Header
+        cell.set_facecolor('#a78bfa')
+        cell.set_text_props(color='white', fontweight='bold')
+    elif col == 4 and row > 0:
+        # Highlight the P(Win|K=k) column
+        p_val = float(table_data[row-1][4]) if table_data[row-1][4] != 'N/A' else 0
+        if p_val >= 0.75:
+            cell.set_facecolor('#166534')   # dark green — high win rate
+        elif p_val >= 0.50:
+            cell.set_facecolor('#1e3a5f')   # dark blue — above average
+        else:
+            cell.set_facecolor('#7f1d1d')   # dark red — below 50%
+        cell.set_text_props(color='white', fontweight='bold')
+    elif row % 2 == 0:
+        cell.set_facecolor('#1a1a2e')
+        cell.set_text_props(color='#e2e8f0')
+    else:
+        cell.set_facecolor('#16213e')
+        cell.set_text_props(color='#e2e8f0')
+
+ax.set_title(
+    f'P(Win | K = k) — 2024 ATP Season\n'
+    f'P(Win | K ≥ 3) = {P_win_3plus*100:.1f}%  via Bayes',
+    color='#e2e8f0', fontsize=13, fontweight='bold', pad=20
+)
+
+plt.tight_layout()
+plt.savefig('bayes_table.png', dpi=150, bbox_inches='tight', facecolor='#0f0f1a')
+plt.show()
+print("Table saved as 'bayes_table.png'")
